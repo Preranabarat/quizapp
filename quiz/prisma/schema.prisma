@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User and Authentication
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  // Authentication
+  accounts Account[]
+
+  // Credits
+  credits            Int                 @default(1)
+  creditTransactions CreditTransaction[]
+
+  // User Statistics
+  gamesPlayed Int   @default(0)
+  wins        Int   @default(0)
+  losses      Int   @default(0)
+  draws       Int   @default(0)
+  winRate     Float @default(0)
+  totalPoints Int   @default(0)
+  rank        Int?
+
+  // Relationships
+  hostedRooms    Room[]             @relation("RoomHost")
+  subscription   Subscription?
+  quizCategories UserQuizCategory[]
+  achievements   UserAchievement[]
+
+  // Timestamps
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  RoomParticipant RoomParticipant[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// Credit System
+model CreditTransaction {
+  id          String          @id @default(uuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  amount      Int // Negative for deductions, positive for additions
+  type        TransactionType
+  roomId      String?
+  description String
+  createdAt   DateTime        @default(now())
+
+  @@index([userId])
+  @@index([type])
+}
+
+model Room {
+  id              String     @id @unique @default(uuid())
+  status          RoomStatus @default(WAITING)
+  maxParticipants Int        @default(2)
+  creditCost      Int        @default(1)
+  roomTimeLimit   Int        @default(300) // Total room time in seconds
+  questionCount   Int        @default(10)
+  difficulty      Difficulty @default(EASY)
+  quizTopic       String?    // Add quiz topic field
+
+  // GameSession data merged
+  startTime DateTime  @default(now())
+  endTime   DateTime?
+  duration  Int      // Duration in seconds
+
+  // Relations
+  hostId         String
+  host           User          @relation("RoomHost", fields: [hostId], references: [id])
+  quizCategoryId String?
+  QuizCategory   QuizCategory? @relation(fields: [quizCategoryId], references: [id])
+
+  participants RoomParticipant[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hostId])
+  @@index([status])
+}
+
+model RoomParticipant {
+  id       String   @id @default(uuid())
+  userId   String
+  roomId   String?
+  joinedAt DateTime @default(now())
+
+  user User  @relation(fields: [userId], references: [id])
+  Room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  // @@unique([userId])
+}
+
+// Quiz Content
+model QuizCategory {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  imageUrl    String?
+  isActive    Boolean @default(true)
+  isPremium   Boolean @default(false)
+
+  // Relations
+  questions       Question[]
+  rooms           Room[]
+  userPreferences UserQuizCategory[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([isPremium])
+}
+
+model Question {
+  id            String     @id @default(uuid())
+  questionText  String
+  options       String[] // Array of possible answers
+  correctOption Int // Index of correct answer
+  explanation   String? // Explanation for the correct answer
+  difficulty    Difficulty @default(MEDIUM)
+  points        Int        @default(10)
+
+  // Relations
+  categoryId    String
+  category      QuizCategory   @relation(fields: [categoryId], references: [id])
+  gameQuestions GameQuestion[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([difficulty])
+}
+
+model GameQuestion {
+  id            String              @id @default(uuid())
+  gameSessionId String
+  questionId    String
+  question      Question            @relation(fields: [questionId], references: [id])
+  orderIndex    Int // Question order in the game
+  timeLimit     Int // Time limit for this specific question
+  points        Int                 @default(10)
+  answers       ParticipantAnswer[]
+
+  @@index([gameSessionId])
+  @@index([questionId])
+}
+
+model ParticipantAnswer {
+  id             String       @id @default(uuid())
+  participantId  String
+  questionId     String
+  question       GameQuestion @relation(fields: [questionId], references: [id])
+  selectedOption Int
+  isCorrect      Boolean
+  answerTime     Int // Time taken to answer in seconds
+  pointsEarned   Int
+  createdAt      DateTime     @default(now())
+
+  @@unique([participantId, questionId])
+  @@index([participantId])
+  @@index([questionId])
+}
+
+// User Preferences and Progress
+model UserQuizCategory {
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  categoryId String
+  category   QuizCategory @relation(fields: [categoryId], references: [id])
+  playCount  Int          @default(0)
+  avgScore   Float        @default(0)
+
+  @@unique([userId, categoryId])
+  @@index([userId])
+  @@index([categoryId])
+}
+
+// Achievement System
+model Achievement {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  description String
+  imageUrl    String?
+  condition   String // JSON string containing achievement conditions
+  points      Int               @default(10)
+  users       UserAchievement[]
+
+  @@index([name])
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@index([achievementId])
+}
+
+// Subscription System
+model Subscription {
+  id        String             @id @default(uuid())
+  userId    String             @unique
+  user      User               @relation(fields: [userId], references: [id])
+  plan      SubscriptionPlan
+  status    SubscriptionStatus @default(ACTIVE)
+  startDate DateTime           @default(now())
+  endDate   DateTime?
+  autoRenew Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([status])
+  @@index([plan])
+}
+
+// Enums
+enum TransactionType {
+  GAME_JOIN
+  GAME_HOST
+  CREDIT_PURCHASE
+  CREDIT_REWARD
+  CREDIT_REFUND
+}
+
+enum RoomStatus {
+  WAITING
+  FULL
+  IN_GAME
+  FINISHED
+}
+
+enum GameStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SubscriptionPlan {
+  FREE
+  PREMIUM
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+  EXPERT
+}
