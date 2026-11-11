@@ -28,6 +28,7 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
   const [quizStarted, setQuizStarted] = useState(false);
   const [quizEnded, setQuizEnded] = useState(false);
   const [results, setResults] = useState<any>(null);
+  const [quizError, setQuizError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [waitingTime, setWaitingTime] = useState(0);
   const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
@@ -40,7 +41,9 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
     console.log("Setting up socket listeners for quiz in room:", roomId);
     
     // Immediately request questions if we're joining a game that might be in progress
-    socket.emit("requestQuizQuestions", roomId);
+    if (!quizError) {
+      socket.emit("requestQuizQuestions", roomId);
+    }
     
     // Listen for quiz start event
     socket.on("quizStart", (quizData: { 
@@ -54,6 +57,7 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
         setCurrentQuestionIndex(quizData.currentQuestionIndex);
         setTimeLeft(quizData.timeLeft);
         setQuizStarted(true);
+        setQuizError(null);
         setIsReconnecting(false);
         
         // Clear waiting timer if it exists
@@ -63,6 +67,14 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
         }
       } else {
         console.error("Received invalid quiz data:", quizData);
+      }
+    });
+
+    socket.on("quizError", (errorData: { message?: string }) => {
+      setQuizError(errorData?.message || "Unable to generate quiz questions. Please try again later.");
+      if (waitingTimerRef.current) {
+        clearInterval(waitingTimerRef.current);
+        waitingTimerRef.current = null;
       }
     });
 
@@ -102,19 +114,21 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
     socket.on("gameStart", () => {
       console.log("Game started in room:", roomId);
       // Immediately request the quiz questions as soon as we know the game has started
-      socket.emit("requestQuizQuestions", roomId);
+      if (!quizError) {
+        socket.emit("requestQuizQuestions", roomId);
+      }
     });
 
     // Start a timer to track how long we've been waiting
-    waitingTimerRef.current = setInterval(() => {
+    if (!quizError) waitingTimerRef.current = setInterval(() => {
       setWaitingTime(prev => {
         // Request questions if we've been waiting for 2 seconds
-        if (prev === 2 && !quizStarted) {
+        if (prev === 2 && !quizStarted && !quizError) {
           console.log("Requesting quiz questions after 2 seconds");
           socket.emit("requestQuizQuestions", roomId);
         }
         // Try again if we've been waiting for 5 seconds
-        else if (prev === 5 && !quizStarted) {
+        else if (prev === 5 && !quizStarted && !quizError) {
           console.log("Requesting quiz questions again after 5 seconds");
           socket.emit("requestQuizQuestions", roomId);
         }
@@ -125,6 +139,7 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
     return () => {
       console.log("Cleaning up socket listeners");
       socket.off("quizStart");
+      socket.off("quizError");
       socket.off("nextQuestion");
       socket.off("quizResults");
       socket.off("questionResults");
@@ -139,16 +154,30 @@ const QuizSession: React.FC<QuizSessionProps> = ({ roomId }) => {
         redirectTimerRef.current = null;
       }
     };
-  }, [socket, roomId, quizStarted, router]);
+  }, [socket, roomId, quizStarted, quizError, router]);
 
   // Request quiz questions if we've been waiting too long
   useEffect(() => {
-    if (waitingTime > 10 && !quizStarted && socket) {
+    if (waitingTime > 10 && !quizStarted && !quizError && socket) {
       console.log("Still waiting for questions after 10 seconds, requesting again");
       socket.emit("requestQuizQuestions", roomId);
       setWaitingTime(0); // Reset timer to avoid spamming requests
     }
-  }, [waitingTime, quizStarted, socket, roomId]);
+  }, [waitingTime, quizStarted, quizError, socket, roomId]);
+
+  if (quizError) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="max-w-md text-center">
+          <h3 className="text-xl font-medium text-white mb-2">Quiz unavailable</h3>
+          <p className="text-gray-400">{quizError}</p>
+          <Button onClick={() => router.push("/dashboard")} className="mt-4">
+            Back to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const handleAnswer = (selectedOption: number) => {
     console.log(`Submitting answer: ${selectedOption} for question ${currentQuestionIndex}`);

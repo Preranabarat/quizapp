@@ -25,8 +25,8 @@ export async function generateMcqs(topic: string, count: number, difficulty: str
   const difficultyLevel = difficulty.toUpperCase();
   console.log(`Generating ${count} MCQs about ${topic} with ${difficultyLevel} difficulty using Gemini API`);
 
-  // Try newer models first, then fall back to older ones if needed
-  const modelNames = ["gemini-1.5-pro", "gemini-1.0-pro", "gemini-pro"];
+  const modelNames = ["gemini-3.5-flash-lite", "gemini-3.6-flash"];
+  let lastError: unknown;
   
   for (const modelName of modelNames) {
     try {
@@ -71,6 +71,8 @@ export async function generateMcqs(topic: string, count: number, difficulty: str
       Important: 
       - Return ONLY the JSON array with no additional text
       - Each question should match the ${difficultyLevel} difficulty level
+      - Questions must be distinct and cover different concepts or question styles
+      - Do not repeat or rephrase the same question
       - The correct answer index must be accurate (0-3)
       - Do not include any explanations or introductions outside the JSON`;
       
@@ -100,139 +102,48 @@ export async function generateMcqs(topic: string, count: number, difficulty: str
       const questions = JSON.parse(jsonText);
       
       console.log(`Successfully parsed ${questions.length} questions`);
-      
-      // Validate and format questions
-      return questions.map((q: any, index: number) => ({
-        id: `gemini-q${index + 1}`,
-        questionText: q.questionText,
-        options: q.options,
-        correctOption: q.correctOption,
-        timeLimit: 30, // Fixed time limit of 30 seconds
-        difficulty: difficultyLevel // Include the difficulty level
-      }));
+
+      if (!Array.isArray(questions) || questions.length !== count) {
+        throw new Error(`Expected ${count} questions, received ${Array.isArray(questions) ? questions.length : "invalid response"}`);
+      }
+
+      const seenQuestions = new Set<string>();
+      return questions.map((q: any, index: number) => {
+        const questionText = typeof q?.questionText === "string" ? q.questionText.trim() : "";
+        const normalizedQuestion = questionText.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        if (!questionText || !normalizedQuestion || seenQuestions.has(normalizedQuestion)) {
+          throw new Error(`Question ${index + 1} is empty or duplicates another question`);
+        }
+        seenQuestions.add(normalizedQuestion);
+
+        if (
+          !Array.isArray(q.options) ||
+          q.options.length !== 4 ||
+          q.options.some((option: unknown) => typeof option !== "string" || !option.trim()) ||
+          !Number.isInteger(q.correctOption) ||
+          q.correctOption < 0 ||
+          q.correctOption > 3
+        ) {
+          throw new Error(`Question ${index + 1} has invalid answer options`);
+        }
+
+        return {
+          id: `gemini-q${index + 1}`,
+          questionText,
+          options: q.options,
+          correctOption: q.correctOption,
+          timeLimit: 30,
+          difficulty: difficultyLevel
+        };
+      });
     } catch (error) {
+      lastError = error;
       console.error(`Error with model ${modelName}:`, error);
       // Continue to the next model if this one fails
     }
   }
   
-  // If we get here, all models failed
   console.error('All Gemini API models failed');
-  
-  // Generate placeholder questions as fallback
-  console.log(`Generating ${count} placeholder questions since Gemini API failed`);
-  return generatePlaceholderQuestions(topic, count, difficultyLevel);
-}
-
-// Function to generate more interesting placeholder questions when the API fails
-function generatePlaceholderQuestions(topic: string, count: number, difficulty: string): McqQuestion[] {
-  const questions: McqQuestion[] = [];
-  
-  // Topics for different subjects
-  const scienceQuestions = [
-    {
-      questionText: "What is the closest planet to the Sun?",
-      options: ["Mercury", "Venus", "Earth", "Mars"],
-      correctOption: 0
-    },
-    {
-      questionText: "Which of the following is NOT a state of matter?",
-      options: ["Energy", "Solid", "Liquid", "Gas"],
-      correctOption: 0
-    },
-    {
-      questionText: "What is the chemical symbol for water?",
-      options: ["H2O", "CO2", "O2", "NaCl"],
-      correctOption: 0
-    },
-    {
-      questionText: "Which of these animals is a mammal?",
-      options: ["Dolphin", "Shark", "Turtle", "Snake"],
-      correctOption: 0
-    },
-    {
-      questionText: "What does DNA stand for?",
-      options: ["Deoxyribonucleic Acid", "Dual Nitrogen Atom", "Digital Numeric Array", "Diverse Natural Arrangement"],
-      correctOption: 0
-    }
-  ];
-  
-  const generalQuestions = [
-    {
-      questionText: "Which of these countries is in Europe?",
-      options: ["France", "Japan", "Brazil", "Australia"],
-      correctOption: 0
-    },
-    {
-      questionText: "What is the largest ocean on Earth?",
-      options: ["Pacific Ocean", "Atlantic Ocean", "Indian Ocean", "Arctic Ocean"],
-      correctOption: 0
-    },
-    {
-      questionText: "Who wrote 'Romeo and Juliet'?",
-      options: ["William Shakespeare", "Charles Dickens", "Jane Austen", "Leo Tolstoy"],
-      correctOption: 0
-    },
-    {
-      questionText: "What is the capital of the United States?",
-      options: ["Washington D.C.", "New York", "Los Angeles", "Chicago"],
-      correctOption: 0
-    },
-    {
-      questionText: "How many sides does a hexagon have?",
-      options: ["Six", "Five", "Seven", "Eight"],
-      correctOption: 0
-    }
-  ];
-  
-  const historyQuestions = [
-    {
-      questionText: "In which year did World War II end?",
-      options: ["1945", "1939", "1918", "1941"],
-      correctOption: 0
-    },
-    {
-      questionText: "Who was the first president of the United States?",
-      options: ["George Washington", "Thomas Jefferson", "Abraham Lincoln", "John Adams"],
-      correctOption: 0
-    },
-    {
-      questionText: "Which ancient civilization built the pyramids at Giza?",
-      options: ["Egyptians", "Romans", "Greeks", "Mayans"],
-      correctOption: 0
-    },
-    {
-      questionText: "The Renaissance period began in which country?",
-      options: ["Italy", "France", "England", "Spain"],
-      correctOption: 0
-    },
-    {
-      questionText: "What was the name of the ship that the Pilgrims sailed to America in 1620?",
-      options: ["Mayflower", "Santa Maria", "Discovery", "Victoria"],
-      correctOption: 0
-    }
-  ];
-  
-  // Select questions based on topic
-  let sourceQuestions = generalQuestions;
-  if (topic.toLowerCase().includes("science")) {
-    sourceQuestions = scienceQuestions;
-  } else if (topic.toLowerCase().includes("history")) {
-    sourceQuestions = historyQuestions;
-  }
-  
-  // Create the placeholder questions
-  for (let i = 0; i < count; i++) {
-    const index = i % sourceQuestions.length;
-    questions.push({
-      id: `placeholder-q${i + 1}`,
-      questionText: sourceQuestions[index].questionText,
-      options: sourceQuestions[index].options,
-      correctOption: sourceQuestions[index].correctOption,
-      timeLimit: 30,
-      difficulty: difficulty
-    });
-  }
-  
-  return questions;
+  const detail = lastError instanceof Error ? lastError.message : "Unknown generation error";
+  throw new Error(`Unable to generate quiz questions: ${detail}`);
 } 

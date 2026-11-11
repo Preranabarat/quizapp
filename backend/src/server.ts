@@ -420,63 +420,16 @@ export function startQuiz(roomId: string) {
         // Start the first question timer
         startQuestionTimer(roomId);
       })
-      .catch(error => {
-        console.error(`Error generating questions with Gemini API: ${error.message}`);
-        
-        // Generate basic placeholder questions since Gemini API failed
-        const placeholderQuestions = generatePlaceholderQuestions(topic, questionCount, difficulty);
-        activeQuizzes[roomId] = placeholderQuestions;
-        
-        console.log(`Generated ${placeholderQuestions.length} placeholder MCQs for room ${roomId} due to API failure`);
-        
-        // Store questions in database
-        storeQuizQuestions(roomId, placeholderQuestions);
-        
-        // Initialize quiz results
-        if (!quizResults[roomId]) {
-          quizResults[roomId] = {};
-          
-          // Initialize results for each participant
-          rooms[roomId].participants.forEach(participant => {
-            quizResults[roomId][participant.id] = {
-              score: 0,
-              answers: [],
-              previousScore: 0
-            };
-          });
-        }
-        
-        // Start the first question timer
-        startQuestionTimer(roomId);
+      .catch((error: unknown) => {
+        console.error(`Error generating questions with Gemini API:`, error);
+        io.in(roomId).emit("quizError", {
+          message: error instanceof Error ? error.message : "Quiz question generation failed"
+        });
       });
   } else {
     // Questions already exist, just start the timer
     startQuestionTimer(roomId);
   }
-}
-
-// Function to generate placeholder questions when Gemini API fails
-export function generatePlaceholderQuestions(topic: string, count: number, difficulty: string): any[] {
-  console.log(`Generating ${count} placeholder questions about ${topic} due to API failure`);
-  
-  const questions = [];
-  for (let i = 0; i < count; i++) {
-    questions.push({
-      id: `placeholder-q${i + 1}`,
-      questionText: `Question ${i + 1} about ${topic} (Gemini API unavailable)`,
-      options: [
-        "First option",
-        "Second option",
-        "Third option",
-        "Fourth option"
-      ],
-      correctOption: 0,
-      timeLimit: 30,
-      difficulty: difficulty
-    });
-  }
-  
-  return questions;
 }
 
 // Function to start the timer for a question
