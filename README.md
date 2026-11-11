@@ -169,7 +169,7 @@ This project is licensed under the ISC License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-Made with ❤️ by Santanu Dutta
+Made with ❤️ by Prerana barat
 
 </div> # quizapp
 # quizapp
